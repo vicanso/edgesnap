@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>EdgeSnap · 证件自动抓拍</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #131a22;
+      --line: #243240;
+      --ink: #e7eef5;
+      --muted: #8aa0b2;
+      --ok: #00e5a0;
+      --warn: #ffce4d;
+      --bad: #ff5c6c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(1200px 800px at 70% -10%, #16212c, var(--bg));
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft Yahei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 22px 18px 64px; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+    header h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+    header .tag { color: var(--muted); font-size: 13px; }
+    .badge {
+      margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--muted);
+    }
+    .badge[data-ok="1"] { color: var(--ok); border-color: #1d4a3d; background: #0f1f1a; }
+    .badge[data-ok="0"] { color: var(--warn); border-color: #4a3f1d; background: #1f1b0f; }
+
+    .stage {
+      position: relative; border-radius: 16px; overflow: hidden;
+      background: #000; border: 1px solid var(--line);
+      aspect-ratio: 4 / 3;
+    }
+    .stage video, .stage canvas#overlay {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: contain;
+    }
+    .flash {
+      position: absolute; inset: 0; background: #fff; opacity: 0;
+      pointer-events: none; transition: opacity .12s ease;
+    }
+    .flash.on { opacity: .85; transition: none; }
+
+    .pill {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+      padding: 8px 16px; border-radius: 999px;
+      background: rgba(16,24,20,0.7); border: 1px solid rgba(143,230,192,0.35);
+      color: #d7f5e8; font-size: 14px; font-weight: 600;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      pointer-events: none; transition: .2s;
+    }
+    .pill svg { width: 18px; height: 18px; flex: none; }
+    .pill.lock { background: rgba(0,90,62,0.82); border-color: var(--ok); color: #ccffee; }
+
+    .caption { text-align: center; margin-top: 18px; }
+    .caption .title { font-size: 17px; font-weight: 700; color: var(--ink); }
+    .caption .subtitle { margin-top: 6px; font-size: 13px; color: var(--muted); min-height: 1.4em; }
+    .caption .subtitle[data-on="1"] { color: var(--ok); font-weight: 600; }
+    .prog { width: min(360px, 80%); margin: 14px auto 0; height: 6px; border-radius: 999px; background: #1a232d; overflow: hidden; }
+    .prog > i { display: block; height: 100%; width: 0; background: var(--warn); transition: width .08s linear; }
+    .prog > i[data-ready="1"] { background: var(--ok); }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+    button {
+      font: inherit; color: var(--ink); background: #1b2530; border: 1px solid var(--line);
+      padding: 10px 16px; border-radius: 10px; cursor: pointer; transition: .15s;
+    }
+    button:hover { border-color: #36506a; background: #1f2c39; }
+    button.primary { background: var(--ok); color: #042018; border-color: transparent; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.06); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); user-select: none; }
+
+    .result { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 20px; }
+    .result h3 { margin: 0 0 12px; font-size: 14px; color: var(--muted); font-weight: 600; }
+    .shotwrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+    canvas#shot {
+      max-width: 340px; max-height: 240px; border-radius: 12px;
+      border: 1px solid var(--line); background: #0d141b;
+    }
+    .meta { color: var(--muted); font-size: 13px; min-height: 1.5em; }
+    .meta b { color: var(--ink); }
+    footer { margin-top: 30px; color: #5f7385; font-size: 12px; line-height: 1.7; }
+    code { background: #0d141b; border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>EdgeSnap</h1>
+      <span class="tag">身份证取景采集 · 自动抓拍</span>
+      <span id="iso" class="badge" data-ok="0">SAB</span>
+    </header>
+
+    <div class="stage">
+      <video id="cam" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="flash" class="flash"></div>
+      <div class="pill" id="pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 8V5a2 2 0 0 1 2-2h3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+          <path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M21 16v3a2 2 0 0 1-2 2h-3" />
+        </svg>
+        <span id="pillText">对齐后自动拍照</span>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div class="title">请将身份证人像面放入框内</div>
+      <div id="status" class="subtitle" data-on="0">头像对准左侧虚线框，保持清晰平整</div>
+      <div class="prog"><i id="prog" data-ready="0"></i></div>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" class="primary">开启摄像头</button>
+      <button id="snapBtn" disabled>手动抓拍</button>
+      <label class="toggle"><input type="checkbox" id="autoChk" checked /> 自动抓拍</label>
+    </div>
+
+    <div class="result">
+      <h3>最近抓拍</h3>
+      <div class="shotwrap">
+        <canvas id="shot" width="1" height="1"></canvas>
+        <div>
+          <div id="shotMeta" class="meta">尚无抓拍。把身份证移入取景框、对齐边框，即自动抓拍。</div>
+          <div style="margin-top:12px"><button id="dlBtn" disabled>下载 PNG</button></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      引擎：Rust → WebAssembly（灰度 → 模糊 → Sobel → 阈值 → 连通域 → 四角拟合）。
+      检测在 Web Worker 中运行，帧数据经 <code>SharedArrayBuffer</code> 零拷贝传入，需要
+      <code>COOP/COEP</code> 响应头（用随附的 <code>serve.py</code> 启动即可）。
+    </footer>
+  </div>
+
+  <script type="module" src="./main.mjs"></script>
+</body>
+</html>
